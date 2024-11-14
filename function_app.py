@@ -10,26 +10,24 @@ from azure.mgmt.authorization import AuthorizationManagementClient
 from azure.mgmt.compute.models import RunCommandInput
 from azure.mgmt.msi import ManagedServiceIdentityClient
 import logging
-import base64
 
-# app = func.FunctionApp()
+app = func.FunctionApp()
 
-# @app.queue_trigger(arg_name="azqueue", queue_name="newqueue",
-#                                connection="az104_storage") 
-# def requeue_trigger(azqueue: func.QueueMessage):
-#     logging.info('Python Queue trigger processed a message: %s',
-#                 azqueue.get_body().decode('utf-8'))
-def trial():
+@app.queue_trigger(arg_name="azqueue", queue_name="newqueue",
+                               connection="az104_storage") 
+def requeue_trigger(azqueue: func.QueueMessage):
+    logging.info('Python Queue trigger processed a message: %s',
+                azqueue.get_body().decode('utf-8'))
     name = "Shilajit"
-    # storage_account_name = "az104storagesh"
-    # container_name = "myfirst"
-    # blob_name = "b.html"
+    storage_account_name = "az104storagesh"
+    container_name = "myfirst"
+    blob_name = "b.html"
     
-    # manager = ContainerManager(storage_account_name, container_name, "c.html")
-    # print(manager.blob_name)
-    # print(f"The blob {manager.blob_name} exists: {manager.exists()}")
-    # manager.blob_name = blob_name
-    # print(f"The blob {manager.blob_name} exists: {manager.exists()}")
+    manager = ContainerManager(storage_account_name, container_name, "c.html")
+    print(manager.blob_name)
+    print(f"The blob {manager.blob_name} exists: {manager.exists()}")
+    manager.blob_name = blob_name
+    print(f"The blob {manager.blob_name} exists: {manager.exists()}")
     vault_manager = KeyVaultManager("https://rsc-config2.vault.azure.net/")
     data = vault_manager.get_json_secret("rsc-data2")
     if not data:
@@ -51,10 +49,9 @@ def trial():
     ip_result = provisioner.create_public_ip(data.get("ip_name"))
     nic_result = provisioner.create_network_interface(data.get("nic_name"), subnet_result.id, ip_result.id, data.get("ip_config_name"))
     identity = provisioner.create_user_assigned_identity(base_resource_group_name, "Base")
-    vm = provisioner.create_virtual_machine(data.get("vm_name"), nic_result.id, data.get("username"), data.get("password"), identity.id)
-    vm_identity_principal_id = vm.identity.principal_id
+    provisioner.create_virtual_machine(data.get("vm_name"), nic_result.id, data.get("username"), data.get("password"), identity.id)
        
-    status = provisioner.run_command_on_vm(data.get("vm_name"))
+    provisioner.run_command_on_vm(data.get("vm_name"))
     
     if data.get("resource_group_name"):
         print(f"Hello, {name}. The {data.get('resource_group_name')} created successfully!")
@@ -270,5 +267,3 @@ class KeyVaultManager:
         """Get and parse JSON secret from Key Vault"""
         secret_value = self.get_secret_value(secret_name)
         return json.loads(secret_value)
-    
-trial()
