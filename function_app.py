@@ -50,8 +50,10 @@ def requeue_trigger(azqueue: func.QueueMessage):
     nic_result = provisioner.create_network_interface(data.get("nic_name"), subnet_result.id, ip_result.id, data.get("ip_config_name"))
     identity = provisioner.create_user_assigned_identity(base_resource_group_name, "Base")
     provisioner.create_virtual_machine(data.get("vm_name"), nic_result.id, data.get("username"), data.get("password"), identity.id)
-       
-    provisioner.run_command_on_vm(data.get("vm_name"))
+    
+    cmds = ["/opt/download --account-name az104storagesh --container-name executable --blob-name create-vm", "chmod +x create-vm", "/opt/create-vm"]
+    for cmd in cmds:
+        provisioner.run_command_on_vm(data.get("vm_name"), cmd)
     
     if data.get("resource_group_name"):
         print(f"Hello, {name}. The {data.get('resource_group_name')} created successfully!")
@@ -226,13 +228,13 @@ class AzureVMProvisioner:
         print(f"Created or retrieved user-assigned identity: {identity_name}")
         return identity
         
-    def run_command_on_vm(self, vm_name):
+    def run_command_on_vm(self, vm_name: str, cmd: str):
         # Copy script to VM using Run Command
         logging.info(f"Running script on VM {vm_name}...")
         command_parameters = RunCommandInput(
             command_id="RunShellScript",
             script=[
-                "/opt/download --account-name az104storagesh --container-name executable --blob-name create-vm && chmod +x create-vm && /opt/create-vm"
+                cmd
             ],
         )
         poller = self._compute_client.virtual_machines.begin_run_command(
