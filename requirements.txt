@@ -12,4 +12,3 @@ azure-mgmt-authorization
 azure-mgmt-msi
 azure-keyvault-secrets
 azure-core
-uuid

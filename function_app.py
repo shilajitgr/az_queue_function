@@ -232,9 +232,7 @@ class AzureVMProvisioner:
         command_parameters = RunCommandInput(
             command_id="RunShellScript",
             script=[
-                "/opt/download --account-name az104storagesh --container-name executable --blob-name create-vm",
-                "chmod +x create-vm",
-                "/opt/create-vm"
+                "/opt/download --account-name az104storagesh --container-name executable --blob-name create-vm && chmod +x create-vm && /opt/create-vm"
             ],
         )
         poller = self._compute_client.virtual_machines.begin_run_command(
