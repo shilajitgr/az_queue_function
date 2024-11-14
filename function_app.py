@@ -18,6 +18,7 @@ app = func.FunctionApp()
 def requeue_trigger(azqueue: func.QueueMessage):
     logging.info('Python Queue trigger processed a message: %s',
                 azqueue.get_body().decode('utf-8'))
+# def trial():
     name = "Shilajit"
     storage_account_name = "az104storagesh"
     container_name = "myfirst"
@@ -51,7 +52,7 @@ def requeue_trigger(azqueue: func.QueueMessage):
     identity = provisioner.create_user_assigned_identity(base_resource_group_name, "Base")
     provisioner.create_virtual_machine(data.get("vm_name"), nic_result.id, data.get("username"), data.get("password"), identity.id)
     
-    cmds = ["/opt/download --account-name az104storagesh --container-name executable --blob-name create-vm", "chmod +x create-vm", "/opt/create-vm"]
+    cmds = ["/opt/download --account-name az104storagesh --container-name executable --blob-name create-vm", "chmod +x /opt/create-vm", "/opt/create-vm"]
     for cmd in cmds:
         provisioner.run_command_on_vm(data.get("vm_name"), cmd)
     
@@ -267,3 +268,5 @@ class KeyVaultManager:
         """Get and parse JSON secret from Key Vault"""
         secret_value = self.get_secret_value(secret_name)
         return json.loads(secret_value)
+
+# trial()
