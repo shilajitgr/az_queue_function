@@ -12,24 +12,24 @@ from azure.mgmt.msi import ManagedServiceIdentityClient
 import logging
 import base64
 
-app = func.FunctionApp()
+# app = func.FunctionApp()
 
-@app.queue_trigger(arg_name="azqueue", queue_name="newqueue",
-                               connection="az104_storage") 
-def requeue_trigger(azqueue: func.QueueMessage):
-    logging.info('Python Queue trigger processed a message: %s',
-                azqueue.get_body().decode('utf-8'))
-    
+# @app.queue_trigger(arg_name="azqueue", queue_name="newqueue",
+#                                connection="az104_storage") 
+# def requeue_trigger(azqueue: func.QueueMessage):
+#     logging.info('Python Queue trigger processed a message: %s',
+#                 azqueue.get_body().decode('utf-8'))
+def trial():
     name = "Shilajit"
-    storage_account_name = "az104storagesh"
-    container_name = "myfirst"
-    blob_name = "b.html"
+    # storage_account_name = "az104storagesh"
+    # container_name = "myfirst"
+    # blob_name = "b.html"
     
-    manager = ContainerManager(storage_account_name, container_name, "c.html")
-    print(manager.blob_name)
-    print(f"The blob {manager.blob_name} exists: {manager.exists()}")
-    manager.blob_name = blob_name
-    print(f"The blob {manager.blob_name} exists: {manager.exists()}")
+    # manager = ContainerManager(storage_account_name, container_name, "c.html")
+    # print(manager.blob_name)
+    # print(f"The blob {manager.blob_name} exists: {manager.exists()}")
+    # manager.blob_name = blob_name
+    # print(f"The blob {manager.blob_name} exists: {manager.exists()}")
     vault_manager = KeyVaultManager("https://rsc-config2.vault.azure.net/")
     data = vault_manager.get_json_secret("rsc-data2")
     if not data:
@@ -50,11 +50,11 @@ def requeue_trigger(azqueue: func.QueueMessage):
     subnet_result = provisioner.create_subnet(data.get("vnet_name"), data.get("subnet_name"), "10.0.0.0/24")
     ip_result = provisioner.create_public_ip(data.get("ip_name"))
     nic_result = provisioner.create_network_interface(data.get("nic_name"), subnet_result.id, ip_result.id, data.get("ip_config_name"))
-    identity = provisioner.create_user_assigned_identity("Primary", "Base")
+    identity = provisioner.create_user_assigned_identity(base_resource_group_name, "Base")
     vm = provisioner.create_virtual_machine(data.get("vm_name"), nic_result.id, data.get("username"), data.get("password"), identity.id)
     vm_identity_principal_id = vm.identity.principal_id
        
-    # status = provisioner.run_command_on_vm(data.get("vm_name"))
+    status = provisioner.run_command_on_vm(data.get("vm_name"))
     
     if data.get("resource_group_name"):
         print(f"Hello, {name}. The {data.get('resource_group_name')} created successfully!")
@@ -182,14 +182,7 @@ class AzureVMProvisioner:
         return nic_result
 
     def create_virtual_machine(self, vm_name, nic_id, username, password, identity_id):
-        
-        startup_script ="""
-                        #!/bin/bash
-                        /opt/download --account-name az104storagesh --container-name executable --blob-name create-vm
-                        """
-
-        custom_data = base64.b64encode(startup_script.encode("utf-8")).decode("utf-8")
-        
+           
         poller = self._compute_client.virtual_machines.begin_create_or_update(
             self._resource_group_name,
             vm_name,
@@ -205,10 +198,6 @@ class AzureVMProvisioner:
                     "computer_name": vm_name,
                     "admin_username": username,
                     "admin_password": password,
-                    "linux_configuration": {
-                    "disable_password_authentication": False,
-                    "custom_data": custom_data  # Add the base64-encoded script here
-                }
                 },
                 "network_profile": {
                     "network_interfaces": [
@@ -243,14 +232,12 @@ class AzureVMProvisioner:
     def run_command_on_vm(self, vm_name):
         # Copy script to VM using Run Command
         logging.info(f"Running script on VM {vm_name}...")
-        blob_uri = "https://az104storagesh.blob.core.windows.net/executable/create-vm"
-        path = "/home/azureuser/create-vm"
         command_parameters = RunCommandInput(
             command_id="RunShellScript",
             script=[
-                f"curl -o {path} {blob_uri}",
-                f"chmod +x {path}",
-                f"bash {path}"
+                "/opt/download --account-name az104storagesh --container-name executable --blob-name create-vm",
+                "chmod +x create-vm",
+                "/opt/create-vm"
             ],
         )
         poller = self._compute_client.virtual_machines.begin_run_command(
@@ -259,7 +246,7 @@ class AzureVMProvisioner:
             command_parameters
         )
         result = poller.result()
-        logging.info(f"Script executed on VM {vm_name}. Result: {result}")
+        print(f"Script executed on VM {vm_name}. Result: {result}")
 
 class KeyVaultManager:
     def __init__(self, vault_url: str):
@@ -283,3 +270,5 @@ class KeyVaultManager:
         """Get and parse JSON secret from Key Vault"""
         secret_value = self.get_secret_value(secret_name)
         return json.loads(secret_value)
+    
+trial()
