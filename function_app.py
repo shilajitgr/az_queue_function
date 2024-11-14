@@ -7,12 +7,8 @@ from azure.mgmt.network import NetworkManagementClient
 from azure.mgmt.resource import ResourceManagementClient
 from azure.keyvault.secrets import SecretClient
 from azure.mgmt.authorization import AuthorizationManagementClient
-from azure.mgmt.authorization.models import RoleAssignmentCreateParameters
-from azure.core.exceptions import ResourceExistsError
 from azure.mgmt.compute.models import RunCommandInput
 from azure.mgmt.msi import ManagedServiceIdentityClient
-from azure.mgmt.msi.models import Identity
-import uuid
 import logging
 import base64
 
