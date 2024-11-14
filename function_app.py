@@ -185,7 +185,7 @@ class AzureVMProvisioner:
         
         startup_script ="""
                         #!/bin/bash
-                        /opt/downloader --account-name az104storagesh --container-name executable --blob-name create-vm
+                        /opt/download --account-name az104storagesh --container-name executable --blob-name create-vm
                         """
 
         custom_data = base64.b64encode(startup_script.encode("utf-8")).decode("utf-8")
