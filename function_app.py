@@ -20,15 +20,6 @@ def requeue_trigger(azqueue: func.QueueMessage):
                 azqueue.get_body().decode('utf-8'))
 # def trial():
     name = "Shilajit"
-    storage_account_name = "az104storagesh"
-    container_name = "myfirst"
-    blob_name = "b.html"
-    
-    manager = ContainerManager(storage_account_name, container_name, "c.html")
-    print(manager.blob_name)
-    print(f"The blob {manager.blob_name} exists: {manager.exists()}")
-    manager.blob_name = blob_name
-    print(f"The blob {manager.blob_name} exists: {manager.exists()}")
     vault_manager = KeyVaultManager("https://rsc-config2.vault.azure.net/")
     data = vault_manager.get_json_secret("rsc-data2")
     if not data:
