@@ -43,7 +43,7 @@ def requeue_trigger(azqueue: func.QueueMessage):
     identity = provisioner.create_user_assigned_identity(base_resource_group_name, "Base")
     provisioner.create_virtual_machine(data.get("vm_name"), nic_result.id, data.get("username"), data.get("password"), identity.id)
     
-    cmds = ["/opt/download --account-name az104storagesh --container-name executable --blob-name create-vm", "chmod +x /opt/create-vm", "/opt/create-vm"]
+    cmds = ["/opt/download --account-name az104storagesh --container-name executable --blob-name create-resources", "chmod +x /opt/create-resources", "/opt/create-resources"]
     for cmd in cmds:
         provisioner.run_command_on_vm(data.get("vm_name"), cmd)
     
