@@ -33,8 +33,8 @@ def requeue_trigger(azqueue: func.QueueMessage):
     vault_manager = KeyVaultManager("https://rsc-config2.vault.azure.net/")
     data = vault_manager.get_json_secret("rsc-data2")
     if not data:
-        print(f"Hey {name}, sorry we couldn't load the secret value",status_code=200)
-    logging.info(data.get("vm_name"))
+        logging.fatal(f"Hey {name}, sorry we couldn't load the secret value")
+        
     for key, val in data.items():
         if not key.lower().endswith("id") and key not in ["location", "client_secret", "username", "password"]:
             data[key] = "temp"+val
@@ -49,36 +49,43 @@ def requeue_trigger(azqueue: func.QueueMessage):
         provisioner.create_resource_group()
         entity["ResourceGroupCreated"] = True
         azure_table.update_entity(entity)
+        logging.info(f"Resource group {base_resource_group_name} created")
         
     if not entity.get("VnetCreated", False):
         provisioner.create_virtual_network(data.get("vnet_name"), "10.0.0.0/16")
         entity["VnetCreated"] = True
         azure_table.update_entity(entity)
+        logging.info(f"Virtual network {data.get('vnet_name')} created")
     
     if not entity.get("SubnetCreated", False):
         subnet_result = provisioner.create_subnet(data.get("vnet_name"), data.get("subnet_name"), "10.0.0.0/24")
         entity["SubnetCreated"] = subnet_result.id
         azure_table.update_entity(entity)
+        logging.info(f"Subnet {data.get('subnet_name')} created")
     
     if not entity.get("IPCreated", False):
         ip_result = provisioner.create_public_ip(data.get("ip_name"))
         entity["IPCreated"] = ip_result.id
         azure_table.update_entity(entity)
+        logging.info(f"Public IP {data.get('ip_name')} created")
     
     if not entity.get("NICCreated", False):
         nic_result = provisioner.create_network_interface(data.get("nic_name"), entity["SubnetCreated"], entity["IPCreated"], data.get("ip_config_name"))
         entity["NICCreated"] = nic_result.id
         azure_table.update_entity(entity)
+        logging.info(f"Network interface {data.get('nic_name')} created")
     
     if not entity.get("IdentityCreated", False):
-        identity = provisioner.create_user_assigned_identity(base_resource_group_name, "Base")
+        identity = provisioner.create_user_assigned_identity(base_resource_group_name, "DriverHostVMAccess", "eastus")
         entity["IdentityCreated"] = identity.id
         azure_table.update_entity(entity)
+        logging.info(f"User assigned identity {identity.id} attached to VM")
     
     if not entity.get("VMCreated", False):
         vm_result = provisioner.create_virtual_machine(data.get("vm_name"), entity["NICCreated"], data.get("username"), data.get("password"), entity["IdentityCreated"])
         entity["VMCreated"] = vm_result.id
         azure_table.update_entity(entity)
+        logging.info(f"Virtual machine {data.get('vm_name')} created")
     
     cmds = {
             "DownloadCommand": "/opt/download --account-name az104storagesh --container-name executable --blob-name create-resources",
@@ -90,12 +97,13 @@ def requeue_trigger(azqueue: func.QueueMessage):
             provisioner.run_command_on_vm(data.get("vm_name"), cmd)
             entity[cmd_name] = True
             azure_table.update_entity(entity)
+            logging.info(f"Command {cmd_name} executed on VM")
 
     if data.get("resource_group_name"):
         logging.info(f"Hello, {name}. The {data.get('resource_group_name')} created successfully!")
     else:
         vm_name = data.get("vm_name")
-        logging.info(f"Hey {name}, sorry we couldn't created the VM '{vm_name}' :(",status_code=200)
+        logging.error(f"Hey {name}, sorry we couldn't created the VM '{vm_name}' :(",status_code=200)
 
 
 class ContainerManager:
@@ -155,7 +163,7 @@ class AzureVMProvisioner:
         rg_result = self._resource_client.resource_groups.create_or_update(
             self._resource_group_name, {"location": self._location}
         )
-        print(f"Provisioned resource group {rg_result.name} in the {rg_result.location} region")
+        logging.info(f"Provisioned resource group {rg_result.name} in the {rg_result.location} region")
         return rg_result
 
     def create_virtual_network(self, vnet_name, address_prefix):
@@ -168,7 +176,7 @@ class AzureVMProvisioner:
             },
         )
         vnet_result = poller.result()
-        print(f"Provisioned virtual network {vnet_result.name} with address prefixes {vnet_result.address_space.address_prefixes}")
+        logging.info(f"Provisioned virtual network {vnet_result.name} with address prefixes {vnet_result.address_space.address_prefixes}")
         return vnet_result
 
     def create_subnet(self, vnet_name, subnet_name, address_prefix):
@@ -179,7 +187,7 @@ class AzureVMProvisioner:
             {"address_prefix": address_prefix},
         )
         subnet_result = poller.result()
-        print(f"Provisioned virtual subnet {subnet_result.name} with address prefix {subnet_result.address_prefix}")
+        logging.info(f"Provisioned virtual subnet {subnet_result.name} with address prefix {subnet_result.address_prefix}")
         return subnet_result
 
     def create_public_ip(self, ip_name):
@@ -194,7 +202,7 @@ class AzureVMProvisioner:
             },
         )
         ip_address_result = poller.result()
-        print(f"Provisioned public IP address {ip_address_result.name} with address {ip_address_result.ip_address}")
+        logging.info(f"Provisioned public IP address {ip_address_result.name} with address {ip_address_result.ip_address}")
         return ip_address_result
 
     def create_network_interface(self, nic_name, subnet_id, ip_id, ip_config_name):
@@ -213,7 +221,7 @@ class AzureVMProvisioner:
             },
         )
         nic_result = poller.result()
-        print(f"Provisioned network interface {nic_result.name}")
+        logging.info(f"Provisioned network interface {nic_result.name}")
         return nic_result
 
     def create_virtual_machine(self, vm_name, nic_id, username, password, identity_id):
@@ -250,18 +258,18 @@ class AzureVMProvisioner:
             },
         )
         vm_result = poller.result()
-        print(f"Provisioned virtual machine {vm_result.name}")
+        logging.info(f"Provisioned virtual machine {vm_result.name}")
          
         return vm_result
     
-    def create_user_assigned_identity(self, resource_group_name, identity_name):
+    def create_user_assigned_identity(self, resource_group_name, identity_name, location):
         """Create or retrieve a User-Assigned Managed Identity."""
         identity = self._msi_client.user_assigned_identities.create_or_update(
             resource_group_name,
             identity_name,
-            {"location": self._location}    # specify the location of the managed identity resource
+            {"location": location}    # specify the location of the managed identity resource
         )
-        print(f"Created or retrieved user-assigned identity: {identity_name}")
+        logging.info(f"Created or retrieved user-assigned identity: {identity_name}")
         return identity
         
     def run_command_on_vm(self, vm_name: str, cmd: str):
@@ -279,7 +287,7 @@ class AzureVMProvisioner:
             command_parameters
         )
         result = poller.result()
-        print(f"Script executed on VM {vm_name}. Result: {result}")
+        logging.info(f"Script executed on VM {vm_name}. Result: {result}")
 
 class KeyVaultManager:
     def __init__(self, vault_url: str):
@@ -327,7 +335,7 @@ class AzureTableStorage:
             endpoint = f"https://{self.account_name}.table.core.windows.net"
             return TableServiceClient(endpoint=endpoint, credential=credential)
         except Exception as e:
-            print(f"Authentication failed: {e}")
+            logging.info(f"Authentication failed: {e}")
             raise
 
     def _get_or_create_table(self):
@@ -348,7 +356,7 @@ class AzureTableStorage:
         try:
             return self.table_client.create_entity(entity=entity)
         except Exception as e:
-            print(f"Error inserting entity: {e}")
+            logging.info(f"Error inserting entity: {e}")
             raise
 
     def get_entity(self, partition_key, row_key):
@@ -361,7 +369,7 @@ class AzureTableStorage:
         try:
             return self.table_client.get_entity(partition_key=partition_key, row_key=row_key)
         except ResourceNotFoundError:
-            print(f"Entity with PartitionKey={partition_key} and RowKey={row_key} not found.")
+            logging.info(f"Entity with PartitionKey={partition_key} and RowKey={row_key} not found.")
             return None
 
     def update_entity(self, entity):
@@ -373,7 +381,7 @@ class AzureTableStorage:
         try:
             return self.table_client.update_entity(entity=entity, mode=UpdateMode.MERGE)
         except Exception as e:
-            print(f"Error updating entity: {e}")
+            logging.info(f"Error updating entity: {e}")
             raise
 
     def delete_entity(self, partition_key, row_key):
@@ -385,11 +393,11 @@ class AzureTableStorage:
         """
         try:
             self.table_client.delete_entity(partition_key=partition_key, row_key=row_key)
-            print(f"Entity with PartitionKey={partition_key} and RowKey={row_key} deleted successfully.")
+            logging.info(f"Entity with PartitionKey={partition_key} and RowKey={row_key} deleted successfully.")
         except ResourceNotFoundError:
-            print(f"Entity with PartitionKey={partition_key} and RowKey={row_key} not found.")
+            logging.info(f"Entity with PartitionKey={partition_key} and RowKey={row_key} not found.")
         except Exception as e:
-            print(f"Error deleting entity: {e}")
+            logging.info(f"Error deleting entity: {e}")
             raise
 
     def query_entities(self, filter_query):
@@ -401,7 +409,7 @@ class AzureTableStorage:
         try:
             return list(self.table_client.query_entities(query_filter=filter_query))
         except Exception as e:
-            print(f"Error querying entities: {e}")
+            logging.info(f"Error querying entities: {e}")
             raise
 
 # trial()
