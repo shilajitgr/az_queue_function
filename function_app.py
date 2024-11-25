@@ -76,6 +76,7 @@ def requeue_trigger(azqueue: func.QueueMessage):
         logging.info(f"Network interface {data.get('nic_name')} created")
     
     if not entity.get("IdentityCreated", False):
+        entity["IdentityDetails"] = f"{[base_resource_group_name, "DriverHostVMAccess", "eastus"]}"
         identity = provisioner.create_user_assigned_identity(base_resource_group_name, "DriverHostVMAccess", "eastus")
         entity["IdentityCreated"] = identity.id
         azure_table.update_entity(entity)
