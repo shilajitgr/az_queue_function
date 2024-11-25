@@ -39,7 +39,7 @@ def requeue_trigger(azqueue: func.QueueMessage):
         if not key.lower().endswith("id") and key not in ["location", "client_secret", "username", "password"]:
             data[key] = "temp"+val
             
-    base_resource_group_name = "Primary"
+    base_resource_group_name = "vm_set"
 
     # Instantiate the class
     provisioner = AzureVMProvisioner(data.get("subscription_id"), data.get("resource_group_name"), data.get("location"), data.get("tenant_id"), data.get("client_id"), data.get("client_secret"))
