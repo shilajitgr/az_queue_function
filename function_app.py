@@ -19,7 +19,7 @@ app = func.FunctionApp()
 @app.queue_trigger(arg_name="azqueue", queue_name="newqueue",
                                connection="az104_storage") 
 def requeue_trigger(azqueue: func.QueueMessage):
-    data = azqueue.get_body().decode('utf-8')
+    data = json.loads(azqueue.get_body().decode('utf-8'))
     logging.info('Python Queue trigger processed a message: %s',
                 data)
 # def trial():
