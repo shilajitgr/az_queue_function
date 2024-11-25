@@ -38,8 +38,6 @@ def requeue_trigger(azqueue: func.QueueMessage):
     for key, val in data.items():
         if not key.lower().endswith("id") and key not in ["location", "client_secret", "username", "password"]:
             data[key] = "temp"+val
-            
-    base_resource_group_name = "vm_set"
 
     # Instantiate the class
     provisioner = AzureVMProvisioner(data.get("subscription_id"), data.get("resource_group_name"), data.get("location"), data.get("tenant_id"), data.get("client_id"), data.get("client_secret"))
@@ -49,7 +47,7 @@ def requeue_trigger(azqueue: func.QueueMessage):
         provisioner.create_resource_group()
         entity["ResourceGroupCreated"] = True
         azure_table.update_entity(entity)
-        logging.info(f"Resource group {base_resource_group_name} created")
+        logging.info(f"Resource group {data.get("resource_group_name")} created")
         
     if not entity.get("VnetCreated", False):
         provisioner.create_virtual_network(data.get("vnet_name"), "10.0.0.0/16")
@@ -76,7 +74,8 @@ def requeue_trigger(azqueue: func.QueueMessage):
         logging.info(f"Network interface {data.get('nic_name')} created")
     
     if not entity.get("IdentityCreated", False):
-        identity = provisioner.create_user_assigned_identity(base_resource_group_name, "DriverHostVMAccess", "eastus")
+        identity = provisioner.create_user_assigned_identity("vm_set", "DriverHostVMAccess", "eastus")
+        # /subscriptions/02f031f1-f05f-4709-8cf7-68d2e343065d/resourcegroups/vm_set/providers/Microsoft.ManagedIdentity/userAssignedIdentities/DriverHostVMAccess
         entity["IdentityCreated"] = identity.id
         azure_table.update_entity(entity)
         logging.info(f"User assigned identity {identity.id} attached to VM")
