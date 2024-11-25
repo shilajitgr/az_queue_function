@@ -11,4 +11,5 @@ azure-mgmt-network
 azure-mgmt-authorization
 azure-mgmt-msi
 azure-keyvault-secrets
+azure-data-tables
 azure-core

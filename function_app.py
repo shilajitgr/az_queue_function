@@ -9,6 +9,9 @@ from azure.keyvault.secrets import SecretClient
 from azure.mgmt.authorization import AuthorizationManagementClient
 from azure.mgmt.compute.models import RunCommandInput
 from azure.mgmt.msi import ManagedServiceIdentityClient
+from azure.data.tables import TableServiceClient
+from azure.data.tables import UpdateMode
+from azure.core.exceptions import ResourceNotFoundError
 import logging
 
 app = func.FunctionApp()
@@ -16,15 +19,22 @@ app = func.FunctionApp()
 @app.queue_trigger(arg_name="azqueue", queue_name="newqueue",
                                connection="az104_storage") 
 def requeue_trigger(azqueue: func.QueueMessage):
+    data = azqueue.get_body().decode('utf-8')
     logging.info('Python Queue trigger processed a message: %s',
-                azqueue.get_body().decode('utf-8'))
+                data)
 # def trial():
+    azure_table = AzureTableStorage()
+    query = f'''PartitionKey eq '{data.get("PartitionKey")}' and RowKey eq '{data.get("RowKey")}' '''
+    results = azure_table.query_entities(query)
+    entity = results[0]
+    entity["MsgRead"] = True
+    azure_table.update_entity(entity)
     name = "Shilajit"
     vault_manager = KeyVaultManager("https://rsc-config2.vault.azure.net/")
     data = vault_manager.get_json_secret("rsc-data2")
     if not data:
         print(f"Hey {name}, sorry we couldn't load the secret value",status_code=200)
-    print(data.get("vm_name"))
+    logging.info(data.get("vm_name"))
     for key, val in data.items():
         if not key.lower().endswith("id") and key not in ["location", "client_secret", "username", "password"]:
             data[key] = "temp"+val
@@ -35,23 +45,57 @@ def requeue_trigger(azqueue: func.QueueMessage):
     provisioner = AzureVMProvisioner(data.get("subscription_id"), data.get("resource_group_name"), data.get("location"), data.get("tenant_id"), data.get("client_id"), data.get("client_secret"))
 
     # Create resources
-    provisioner.create_resource_group()
-    provisioner.create_virtual_network(data.get("vnet_name"), "10.0.0.0/16")
-    subnet_result = provisioner.create_subnet(data.get("vnet_name"), data.get("subnet_name"), "10.0.0.0/24")
-    ip_result = provisioner.create_public_ip(data.get("ip_name"))
-    nic_result = provisioner.create_network_interface(data.get("nic_name"), subnet_result.id, ip_result.id, data.get("ip_config_name"))
-    identity = provisioner.create_user_assigned_identity(base_resource_group_name, "Base")
-    provisioner.create_virtual_machine(data.get("vm_name"), nic_result.id, data.get("username"), data.get("password"), identity.id)
+    if not entity.get("ResourceGroupCreated", False):
+        provisioner.create_resource_group()
+        entity["ResourceGroupCreated"] = True
+        azure_table.update_entity(entity)
+        
+    if not entity.get("VnetCreated", False):
+        provisioner.create_virtual_network(data.get("vnet_name"), "10.0.0.0/16")
+        entity["VnetCreated"] = True
+        azure_table.update_entity(entity)
     
-    cmds = ["/opt/download --account-name az104storagesh --container-name executable --blob-name create-resources", "chmod +x /opt/create-resources", "/opt/create-resources"]
-    for cmd in cmds:
-        provisioner.run_command_on_vm(data.get("vm_name"), cmd)
+    if not entity.get("SubnetCreated", False):
+        subnet_result = provisioner.create_subnet(data.get("vnet_name"), data.get("subnet_name"), "10.0.0.0/24")
+        entity["SubnetCreated"] = subnet_result.id
+        azure_table.update_entity(entity)
     
+    if not entity.get("IPCreated", False):
+        ip_result = provisioner.create_public_ip(data.get("ip_name"))
+        entity["IPCreated"] = ip_result.id
+        azure_table.update_entity(entity)
+    
+    if not entity.get("NICCreated", False):
+        nic_result = provisioner.create_network_interface(data.get("nic_name"), entity["SubnetCreated"], entity["IPCreated"], data.get("ip_config_name"))
+        entity["NICCreated"] = nic_result.id
+        azure_table.update_entity(entity)
+    
+    if not entity.get("IdentityCreated", False):
+        identity = provisioner.create_user_assigned_identity(base_resource_group_name, "Base")
+        entity["IdentityCreated"] = identity.id
+        azure_table.update_entity(entity)
+    
+    if not entity.get("VMCreated", False):
+        vm_result = provisioner.create_virtual_machine(data.get("vm_name"), entity["NICCreated"], data.get("username"), data.get("password"), entity["IdentityCreated"])
+        entity["VMCreated"] = vm_result.id
+        azure_table.update_entity(entity)
+    
+    cmds = {
+            "DownloadCommand": "/opt/download --account-name az104storagesh --container-name executable --blob-name create-resources",
+            "MakeCommandExecutable": "chmod +x /opt/create-resources",
+            "ExecuteCommand": "/opt/create-resources"
+        }
+    for cmd_name, cmd in cmds.items():
+        if not entity.get(cmd_name, False):
+            provisioner.run_command_on_vm(data.get("vm_name"), cmd)
+            entity[cmd_name] = True
+            azure_table.update_entity(entity)
+
     if data.get("resource_group_name"):
-        print(f"Hello, {name}. The {data.get('resource_group_name')} created successfully!")
+        logging.info(f"Hello, {name}. The {data.get('resource_group_name')} created successfully!")
     else:
         vm_name = data.get("vm_name")
-        print(f"Hey {name}, sorry we couldn't created the VM '{vm_name}' :(",status_code=200)
+        logging.info(f"Hey {name}, sorry we couldn't created the VM '{vm_name}' :(",status_code=200)
 
 
 class ContainerManager:
@@ -259,5 +303,105 @@ class KeyVaultManager:
         """Get and parse JSON secret from Key Vault"""
         secret_value = self.get_secret_value(secret_name)
         return json.loads(secret_value)
+
+
+class AzureTableStorage:
+    def __init__(self, account_name="az104storagesh", table_name="DRStateTable"):
+        """
+        Initializes the AzureTableStorage instance.
+        :param account_name: Azure Storage account name.
+        :param table_name: Name of the table to interact with.
+        """
+        self.account_name = account_name
+        self.table_name = table_name
+        self.table_service_client = self._authenticate_with_default_credential()
+        self.table_client = self._get_or_create_table()
+
+    def _authenticate_with_default_credential(self):
+        """
+        Authenticates to Azure Table Storage using DefaultAzureCredential.
+        :return: TableServiceClient instance.
+        """
+        try:
+            credential = DefaultAzureCredential()
+            endpoint = f"https://{self.account_name}.table.core.windows.net"
+            return TableServiceClient(endpoint=endpoint, credential=credential)
+        except Exception as e:
+            print(f"Authentication failed: {e}")
+            raise
+
+    def _get_or_create_table(self):
+        """
+        Gets the table client or creates the table if it does not exist.
+        :return: TableClient instance.
+        """
+        
+        return self.table_service_client.create_table_if_not_exists(table_name=self.table_name)
+        
+
+    def insert_entity(self, entity):
+        """
+        Inserts a new entity into the table.
+        :param entity: A dictionary representing the entity (must include PartitionKey and RowKey).
+        :return: Response from the Azure Table API.
+        """
+        try:
+            return self.table_client.create_entity(entity=entity)
+        except Exception as e:
+            print(f"Error inserting entity: {e}")
+            raise
+
+    def get_entity(self, partition_key, row_key):
+        """
+        Retrieves an entity by PartitionKey and RowKey.
+        :param partition_key: The PartitionKey of the entity.
+        :param row_key: The RowKey of the entity.
+        :return: The entity if found.
+        """
+        try:
+            return self.table_client.get_entity(partition_key=partition_key, row_key=row_key)
+        except ResourceNotFoundError:
+            print(f"Entity with PartitionKey={partition_key} and RowKey={row_key} not found.")
+            return None
+
+    def update_entity(self, entity):
+        """
+        Updates an existing entity in the table.
+        :param entity: A dictionary representing the entity (must include PartitionKey and RowKey).
+        :return: Response from the Azure Table API.
+        """
+        try:
+            return self.table_client.update_entity(entity=entity, mode=UpdateMode.MERGE)
+        except Exception as e:
+            print(f"Error updating entity: {e}")
+            raise
+
+    def delete_entity(self, partition_key, row_key):
+        """
+        Deletes an entity from the table.
+        :param partition_key: The PartitionKey of the entity.
+        :param row_key: The RowKey of the entity.
+        :return: Response from the Azure Table API.
+        """
+        try:
+            self.table_client.delete_entity(partition_key=partition_key, row_key=row_key)
+            print(f"Entity with PartitionKey={partition_key} and RowKey={row_key} deleted successfully.")
+        except ResourceNotFoundError:
+            print(f"Entity with PartitionKey={partition_key} and RowKey={row_key} not found.")
+        except Exception as e:
+            print(f"Error deleting entity: {e}")
+            raise
+
+    def query_entities(self, filter_query):
+        """
+        Queries entities in the table using OData filter syntax.
+        :param filter_query: OData filter query string.
+        :return: List of matching entities.
+        """
+        try:
+            return list(self.table_client.query_entities(query_filter=filter_query))
+        except Exception as e:
+            print(f"Error querying entities: {e}")
+            raise
 
 # trial()
