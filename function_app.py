@@ -24,95 +24,146 @@ def requeue_trigger(azqueue: func.QueueMessage):
     logger = AzureTableStorage(table_name=table_name)
     logger.add_log('Queue Function triggered')
     try:
-        data = json.loads(azqueue.get_body().decode('utf-8'))
+        data = json.loads(azqueue.get_json())
         logger.add_log(f"Msg Had been read {data}")
     except Exception as ex:
-        logger.add_log("Msg could not be read, error while parsing!")
-# def trial():
-    azure_table = AzureTableStorage()
-    query = f'''PartitionKey eq '{data.get("PartitionKey")}' and RowKey eq '{data.get("RowKey")}' '''
-    results = azure_table.query_entities(query)
-    logger.add_log(f"State Table queried and the result count is {len(results)}")
-    entity = results[0]
-    entity["MsgRead"] = True
-    azure_table.update_entity(entity)
-    logger.add_log(f"MsgRead field has been updated")
-    name = "Shilajit"
-    vault_manager = KeyVaultManager("https://rsc-config2.vault.azure.net/")
-    data = vault_manager.get_json_secret("rsc-data2")
-    if not data:
-        logger.add_log(f"Hey {name}, sorry we couldn't load the secret value. Stopping execution!")
+        logger.add_log(f"Error while reading message: {str(ex)}")
         return
-        
-    for key, val in data.items():
-        if not key.lower().endswith("id") and key not in ["location", "client_secret", "username", "password"]:
-            data[key] = "temp"+val
-            
-    base_resource_group_name = "vm_set"
+    
+# def trial():
+    try:
+        azure_table = AzureTableStorage()
+        query = f'''PartitionKey eq '{data.get("PartitionKey")}' and RowKey eq '{data.get("RowKey")}' '''
+        results = azure_table.query_entities(query)
+        logger.add_log(f"State Table queried and the result count is {len(results)}")
+        entity = results[0]
+        entity["MsgRead"] = True
+        azure_table.update_entity(entity)
+        logger.add_log(f"MsgRead field has been updated")
+    except Exception as ex:
+        logger.add_log(f"Error while updating entity: {str(ex)}")
+        return
 
-    # Instantiate the class
-    provisioner = AzureVMProvisioner(data.get("subscription_id"), data.get("resource_group_name"), data.get("location"), data.get("tenant_id"), data.get("client_id"), data.get("client_secret"))
-    logger.add_log(f"VM Provision instantiated")
-    # Create resources
-    if not entity.get("ResourceGroupCreated", False):
-        provisioner.create_resource_group()
-        entity["ResourceGroupCreated"] = True
-        azure_table.update_entity(entity)
-        logger.add_log(f"Resource group {base_resource_group_name} created")
-        
-    if not entity.get("VnetCreated", False):
-        provisioner.create_virtual_network(data.get("vnet_name"), "10.0.0.0/16")
-        entity["VnetCreated"] = True
-        azure_table.update_entity(entity)
-        logger.add_log(f"Virtual network {data.get('vnet_name')} created")
-    
-    if not entity.get("SubnetCreated", False):
-        subnet_result = provisioner.create_subnet(data.get("vnet_name"), data.get("subnet_name"), "10.0.0.0/24")
-        entity["SubnetCreated"] = subnet_result.id
-        azure_table.update_entity(entity)
-        logger.add_log(f"Subnet {data.get('subnet_name')} created")
-    
-    if not entity.get("IPCreated", False):
-        ip_result = provisioner.create_public_ip(data.get("ip_name"))
-        entity["IPCreated"] = ip_result.id
-        azure_table.update_entity(entity)
-        logger.add_log(f"Public IP {data.get('ip_name')} created")
-    
-    if not entity.get("NICCreated", False):
-        nic_result = provisioner.create_network_interface(data.get("nic_name"), entity["SubnetCreated"], entity["IPCreated"], data.get("ip_config_name"))
-        entity["NICCreated"] = nic_result.id
-        azure_table.update_entity(entity)
-        logger.add_log(f"Network interface {data.get('nic_name')} created")
-    
-    if not entity.get("IdentityCreated", False):
-        identity = provisioner.create_user_assigned_identity(base_resource_group_name, "DriverHostVMAccess", "eastus")
-        entity["IdentityCreated"] = identity.id
-        azure_table.update_entity(entity)
-        logger.add_log(f"User assigned identity {identity.id} attached to VM")
-    
-    if not entity.get("VMCreated", False):
-        vm_result = provisioner.create_virtual_machine(data.get("vm_name"), entity["NICCreated"], data.get("username"), data.get("password"), entity["IdentityCreated"])
-        entity["VMCreated"] = vm_result.id
-        azure_table.update_entity(entity)
-        logger.add_log(f"Virtual machine {data.get('vm_name')} created")
-    
-    cmds = {
-            "DownloadCommand": "/opt/download --account-name az104storagesh --container-name executable --blob-name create-resources",
-            "MakeCommandExecutable": "chmod +x /opt/create-resources",
-            "ExecuteCommand": "/opt/create-resources"
-        }
-    for cmd_name, cmd in cmds.items():
-        if not entity.get(cmd_name, False):
-            provisioner.run_command_on_vm(data.get("vm_name"), cmd)
-            entity[cmd_name] = True
+    try:
+        name = "Shilajit"
+        vault_manager = KeyVaultManager("https://rsc-config2.vault.azure.net/")
+        data = vault_manager.get_json_secret("rsc-data2")
+        if not data:
+            logger.add_log(f"Hey {name}, sorry we couldn't load the secret value. Stopping execution!")
+            return
+    except Exception as ex:
+        logger.add_log(f"Error while getting secret from Key Vault: {str(ex)}")
+        return
+
+    try:
+        for key, val in data.items():
+            if not key.lower().endswith("id") and key not in ["location", "client_secret", "username", "password"]:
+                data[key] = "temp"+val
+                
+        base_resource_group_name = "vm_set"
+
+        # Instantiate the class
+        provisioner = AzureVMProvisioner(data.get("subscription_id"), data.get("resource_group_name"), data.get("location"), data.get("tenant_id"), data.get("client_id"), data.get("client_secret"))
+        logger.add_log(f"VM Provision instantiated")
+    except Exception as ex:
+        logger.add_log(f"Error while preparing data for vm provisioning: {str(ex)}")
+        return
+
+    try:
+        if not entity.get("ResourceGroupCreated", False):
+            provisioner.create_resource_group()
+            entity["ResourceGroupCreated"] = True
             azure_table.update_entity(entity)
-            logger.add_log(f"Command {cmd_name} executed on VM")
+            logger.add_log(f"Resource group {base_resource_group_name} created")
+    except Exception as ex:
+        logger.add_log(f"Error while creating resource group: {str(ex)}")
+        return
 
-    if data.get("resource_group_name"):
-        logger.add_log(f"Hello, {name}. The {data.get('resource_group_name')} created successfully!")
-    else:
-        vm_name = data.get("vm_name")
-        logger.add_log(f"Hey {name}, sorry we couldn't created the VM '{vm_name}' :(",status_code=200)
+    try:
+        if not entity.get("VnetCreated", False):
+            provisioner.create_virtual_network(data.get("vnet_name"), "10.0.0.0/16")
+            entity["VnetCreated"] = True
+            azure_table.update_entity(entity)
+            logger.add_log(f"Virtual network {data.get('vnet_name')} created")
+    except Exception as ex:
+        logger.add_log(f"Error while creating virtual network: {str(ex)}")
+        return
+
+    try:
+        if not entity.get("SubnetCreated", False):
+            subnet_result = provisioner.create_subnet(data.get("vnet_name"), data.get("subnet_name"), "10.0.0.0/24")
+            entity["SubnetCreated"] = subnet_result.id
+            azure_table.update_entity(entity)
+            logger.add_log(f"Subnet {data.get('subnet_name')} created")
+    except Exception as ex:
+        logger.add_log(f"Error while creating subnet: {str(ex)}")
+        return
+
+    try:
+        if not entity.get("IPCreated", False):
+            ip_result = provisioner.create_public_ip(data.get("ip_name"))
+            entity["IPCreated"] = ip_result.id
+            azure_table.update_entity(entity)
+            logger.add_log(f"Public IP {data.get('ip_name')} created")
+    except Exception as ex:
+        logger.add_log(f"Error while creating public IP: {str(ex)}")
+        return
+
+    try:
+        if not entity.get("NICCreated", False):
+            nic_result = provisioner.create_network_interface(data.get("nic_name"), entity["SubnetCreated"], entity["IPCreated"], data.get("ip_config_name"))
+            entity["NICCreated"] = nic_result.id
+            azure_table.update_entity(entity)
+            logger.add_log(f"Network interface {data.get('nic_name')} created")
+    except Exception as ex:
+        logger.add_log(f"Error while creating network interface: {str(ex)}")
+        return
+
+    try:
+        if not entity.get("IdentityCreated", False):
+            identity = provisioner.create_user_assigned_identity(base_resource_group_name, "DriverHostVMAccess", "eastus")
+            entity["IdentityCreated"] = identity.id
+            azure_table.update_entity(entity)
+            logger.add_log(f"User assigned identity {identity.id} attached to VM")
+    except Exception as ex:
+        logger.add_log(f"Error while creating user-assigned identity: {str(ex)}")
+        return
+
+    try:
+        if not entity.get("VMCreated", False):
+            vm_result = provisioner.create_virtual_machine(data.get("vm_name"), entity["NICCreated"], data.get("username"), data.get("password"), entity["IdentityCreated"])
+            entity["VMCreated"] = vm_result.id
+            azure_table.update_entity(entity)
+            logger.add_log(f"Virtual machine {data.get('vm_name')} created")
+    except Exception as ex:
+        logger.add_log(f"Error while creating virtual machine: {str(ex)}")
+        return
+
+    try:
+        cmds = {
+                "DownloadCommand": "/opt/download --account-name az104storagesh --container-name executable --blob-name create-resources",
+                "MakeCommandExecutable": "chmod +x /opt/create-resources",
+                "ExecuteCommand": "/opt/create-resources"
+            }
+        for cmd_name, cmd in cmds.items():
+            if not entity.get(cmd_name, False):
+                provisioner.run_command_on_vm(data.get("vm_name"), cmd)
+                entity[cmd_name] = True
+                azure_table.update_entity(entity)
+                logger.add_log(f"Command {cmd_name} executed on VM")
+    except Exception as ex:
+        logger.add_log(f"Error while executing commands on VM: {str(ex)}")
+        return
+
+    try:
+        if data.get("resource_group_name"):
+            logger.add_log(f"Hello, {name}. The {data.get('resource_group_name')} created successfully!")
+        else:
+            vm_name = data.get("vm_name")
+            logger.add_log(f"Hey {name}, sorry we couldn't created the VM '{vm_name}' :(",status_code=200)
+    except Exception as ex:
+        logger.add_log(f"Error while logging final message: {str(ex)}")
+        return
 
 
 class ContainerManager:
@@ -421,6 +472,7 @@ class AzureTableStorage:
                 'RowKey': str(uuid.uuid4()),
                 'Message': log_message
             }
+            logging.info(log_message)
             return self.insert_entity(log_entity)
         except Exception as e:
             print(f"Error adding log: {e}")
