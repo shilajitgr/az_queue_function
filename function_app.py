@@ -1,4 +1,5 @@
 import json
+import uuid
 import azure.functions as func
 from azure.identity import DefaultAzureCredential, ClientSecretCredential
 from azure.storage.blob import ContainerClient
@@ -19,21 +20,29 @@ app = func.FunctionApp()
 @app.queue_trigger(arg_name="azqueue", queue_name="newqueue",
                                connection="az104_storage") 
 def requeue_trigger(azqueue: func.QueueMessage):
-    data = json.loads(azqueue.get_body().decode('utf-8'))
-    logging.info('Python Queue trigger processed a message: %s',
-                data)
+    table_name = ("QueueFuncLogs" + str(uuid.uuid4())).replace("-","")
+    logger = AzureTableStorage(table_name=table_name)
+    logger.add_log('Queue Function triggered')
+    try:
+        data = json.loads(azqueue.get_body().decode('utf-8'))
+        logger.add_log(f"Msg Had been read {data}")
+    except Exception as ex:
+        logger.add_log("Msg could not be read, error while parsing!")
 # def trial():
     azure_table = AzureTableStorage()
     query = f'''PartitionKey eq '{data.get("PartitionKey")}' and RowKey eq '{data.get("RowKey")}' '''
     results = azure_table.query_entities(query)
+    logger.add_log(f"State Table queried and the result count is {len(results)}")
     entity = results[0]
     entity["MsgRead"] = True
     azure_table.update_entity(entity)
+    logger.add_log(f"MsgRead field has been updated")
     name = "Shilajit"
     vault_manager = KeyVaultManager("https://rsc-config2.vault.azure.net/")
     data = vault_manager.get_json_secret("rsc-data2")
     if not data:
-        logging.fatal(f"Hey {name}, sorry we couldn't load the secret value")
+        logger.add_log(f"Hey {name}, sorry we couldn't load the secret value. Stopping execution!")
+        return
         
     for key, val in data.items():
         if not key.lower().endswith("id") and key not in ["location", "client_secret", "username", "password"]:
@@ -43,49 +52,49 @@ def requeue_trigger(azqueue: func.QueueMessage):
 
     # Instantiate the class
     provisioner = AzureVMProvisioner(data.get("subscription_id"), data.get("resource_group_name"), data.get("location"), data.get("tenant_id"), data.get("client_id"), data.get("client_secret"))
-
+    logger.add_log(f"VM Provision instantiated")
     # Create resources
     if not entity.get("ResourceGroupCreated", False):
         provisioner.create_resource_group()
         entity["ResourceGroupCreated"] = True
         azure_table.update_entity(entity)
-        logging.info(f"Resource group {base_resource_group_name} created")
+        logger.add_log(f"Resource group {base_resource_group_name} created")
         
     if not entity.get("VnetCreated", False):
         provisioner.create_virtual_network(data.get("vnet_name"), "10.0.0.0/16")
         entity["VnetCreated"] = True
         azure_table.update_entity(entity)
-        logging.info(f"Virtual network {data.get('vnet_name')} created")
+        logger.add_log(f"Virtual network {data.get('vnet_name')} created")
     
     if not entity.get("SubnetCreated", False):
         subnet_result = provisioner.create_subnet(data.get("vnet_name"), data.get("subnet_name"), "10.0.0.0/24")
         entity["SubnetCreated"] = subnet_result.id
         azure_table.update_entity(entity)
-        logging.info(f"Subnet {data.get('subnet_name')} created")
+        logger.add_log(f"Subnet {data.get('subnet_name')} created")
     
     if not entity.get("IPCreated", False):
         ip_result = provisioner.create_public_ip(data.get("ip_name"))
         entity["IPCreated"] = ip_result.id
         azure_table.update_entity(entity)
-        logging.info(f"Public IP {data.get('ip_name')} created")
+        logger.add_log(f"Public IP {data.get('ip_name')} created")
     
     if not entity.get("NICCreated", False):
         nic_result = provisioner.create_network_interface(data.get("nic_name"), entity["SubnetCreated"], entity["IPCreated"], data.get("ip_config_name"))
         entity["NICCreated"] = nic_result.id
         azure_table.update_entity(entity)
-        logging.info(f"Network interface {data.get('nic_name')} created")
+        logger.add_log(f"Network interface {data.get('nic_name')} created")
     
     if not entity.get("IdentityCreated", False):
         identity = provisioner.create_user_assigned_identity(base_resource_group_name, "DriverHostVMAccess", "eastus")
         entity["IdentityCreated"] = identity.id
         azure_table.update_entity(entity)
-        logging.info(f"User assigned identity {identity.id} attached to VM")
+        logger.add_log(f"User assigned identity {identity.id} attached to VM")
     
     if not entity.get("VMCreated", False):
         vm_result = provisioner.create_virtual_machine(data.get("vm_name"), entity["NICCreated"], data.get("username"), data.get("password"), entity["IdentityCreated"])
         entity["VMCreated"] = vm_result.id
         azure_table.update_entity(entity)
-        logging.info(f"Virtual machine {data.get('vm_name')} created")
+        logger.add_log(f"Virtual machine {data.get('vm_name')} created")
     
     cmds = {
             "DownloadCommand": "/opt/download --account-name az104storagesh --container-name executable --blob-name create-resources",
@@ -97,13 +106,13 @@ def requeue_trigger(azqueue: func.QueueMessage):
             provisioner.run_command_on_vm(data.get("vm_name"), cmd)
             entity[cmd_name] = True
             azure_table.update_entity(entity)
-            logging.info(f"Command {cmd_name} executed on VM")
+            logger.add_log(f"Command {cmd_name} executed on VM")
 
     if data.get("resource_group_name"):
-        logging.info(f"Hello, {name}. The {data.get('resource_group_name')} created successfully!")
+        logger.add_log(f"Hello, {name}. The {data.get('resource_group_name')} created successfully!")
     else:
         vm_name = data.get("vm_name")
-        logging.error(f"Hey {name}, sorry we couldn't created the VM '{vm_name}' :(",status_code=200)
+        logger.add_log(f"Hey {name}, sorry we couldn't created the VM '{vm_name}' :(",status_code=200)
 
 
 class ContainerManager:
@@ -398,6 +407,23 @@ class AzureTableStorage:
             logging.info(f"Entity with PartitionKey={partition_key} and RowKey={row_key} not found.")
         except Exception as e:
             logging.info(f"Error deleting entity: {e}")
+            raise
+
+    def add_log(self, log_message):
+        """
+        Adds a log message to the table.
+        :param log_message: The log message to be added.
+        :return: Response from the Azure Table API.
+        """
+        try:
+            log_entity = {
+                'PartitionKey': 'Logs',
+                'RowKey': str(uuid.uuid4()),
+                'Message': log_message
+            }
+            return self.insert_entity(log_entity)
+        except Exception as e:
+            print(f"Error adding log: {e}")
             raise
 
     def query_entities(self, filter_query):
