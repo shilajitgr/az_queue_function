@@ -24,7 +24,7 @@ def requeue_trigger(azqueue: func.QueueMessage):
     logger = AzureTableStorage(table_name=table_name)
     logger.add_log('Queue Function triggered')
     try:
-        data = json.loads(azqueue.get_json())
+        data = azqueue.get_json()
         logger.add_log(f"Msg Had been read {data}")
     except Exception as ex:
         logger.add_log(f"Error while reading message: {str(ex)}")
